@@ -1,6 +1,8 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <!-- Google tag (gtag.js) -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-Z0545N293J"></script>
     <script>
@@ -12,9 +14,7 @@
     </script>
     <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-8987947512818621"
      crossorigin="anonymous"></script>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dodger - EXTREME</title>
+         <title>Dodger - Extreme</title>
     <style>
         body {
             background-color: #111;
@@ -24,9 +24,12 @@
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            height: 100vh;
+            /* Use 100vh only if mobile controls are below the game */
+            min-height: 100vh; 
             margin: 0;
             overflow: hidden;
+            padding-top: 10px;
+            padding-bottom: 150px; /* Space for mobile joystick */
         }
 
         #game-container {
@@ -34,34 +37,50 @@
             border: 4px solid white;
             box-shadow: 0 0 20px rgba(255, 255, 255, 0.2);
             transition: border-color 0.5s, width 0.5s, height 0.5s;
-            width: 600px;
-            height: 400px;
+            /* Max size constraints for larger screens */
+            max-width: 600px;
+            max-height: 400px;
+
+            /* Responsive Scaling: Use 90% of viewport width, limited by height */
+            width: 90vw;
+            height: 60vw; /* Maintain 3:2 aspect ratio (90vw * 2/3 = 60vw) */
+        }
+
+        @media (min-aspect-ratio: 3/2) {
+             /* If screen is wide, limit based on height instead */
+            #game-container {
+                width: calc(90vh * 1.5); /* 90vh * 3/2 = 135vh */
+                height: 90vh;
+                max-width: 600px;
+            }
         }
 
         canvas {
             display: block;
             background-color: black;
+            width: 100%; /* Make canvas fill its container */
+            height: 100%;
         }
 
         #ui-layer {
             position: absolute;
-            top: 10px;
-            left: 10px;
-            right: 10px;
+            top: 5%; /* Relative positioning */
+            left: 5%;
+            right: 5%;
             display: flex;
             justify-content: space-between;
             pointer-events: none;
             font-weight: bold;
-            font-size: 18px;
+            font-size: clamp(14px, 2.5vw, 18px); /* Responsive font size */
             z-index: 5;
         }
 
         #mode-alert {
             position: absolute;
-            top: 40px;
+            top: 10%;
             width: 100%;
             text-align: center;
-            font-size: 24px;
+            font-size: clamp(18px, 4vw, 24px); 
             font-weight: bold;
             opacity: 0;
             transition: opacity 0.5s;
@@ -80,14 +99,14 @@
             z-index: 10;
         }
 
-        h1 { margin: 0 0 20px 0; font-size: 40px; color: red; }
+        h1 { margin: 0 0 20px 0; font-size: clamp(30px, 8vw, 40px); color: red; }
         button {
             background: transparent;
             border: 2px solid yellow;
             color: yellow;
             padding: 10px 20px;
             font-family: inherit;
-            font-size: 18px;
+            font-size: clamp(16px, 3vw, 18px);
             cursor: pointer;
             text-transform: uppercase;
         }
@@ -95,6 +114,43 @@
         
         .hp-bar { color: #ffeb3b; }
         .score-display { color: #fff; }
+
+        /* --- Joystick Styling --- */
+        #joystick-base {
+            display: none; 
+            position: fixed;
+            bottom: 30px;
+            left: 30px;
+            /* Use clamp for size: min(60px), preferred(15vw), max(100px) */
+            width: clamp(60px, 15vw, 100px); 
+            height: clamp(60px, 15vw, 100px); 
+            background: rgba(255, 255, 255, 0.15);
+            border: 2px solid rgba(255, 255, 255, 0.5);
+            border-radius: 50%;
+            touch-action: none;
+            z-index: 20;
+        }
+
+        #joystick-thumb {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 40%; 
+            height: 40%;
+            background: rgba(255, 255, 255, 0.8);
+            border-radius: 50%;
+        }
+
+        @media (max-width: 768px) {
+            #joystick-base {
+                display: block; 
+            }
+        }
+        @media (min-width: 769px) {
+            /* On larger screens, remove the bottom padding */
+            body { padding-bottom: 10px; }
+        }
     </style>
 </head>
 <body>
@@ -105,13 +161,17 @@
             <span class="score-display">SCORE: <span id="score-val">0</span></span>
         </div>
         <div id="mode-alert">MODE CHANGE!</div>
-        <canvas id="gameCanvas" width="600" height="400"></canvas>
+        <canvas id="gameCanvas"></canvas>
         
         <div id="game-over">
             <h1>GAME OVER</h1>
             <p>Score: <span id="final-score">0</span></p>
             <button onclick="resetGame()">Try Again</button>
         </div>
+    </div>
+
+    <div id="joystick-base">
+        <div id="joystick-thumb"></div>
     </div>
 
     <script>
@@ -123,14 +183,25 @@
         const finalScoreEl = document.getElementById('final-score');
         const gameOverScreen = document.getElementById('game-over');
         const modeAlert = document.getElementById('mode-alert');
+        
+        // Joystick DOM elements
+        const joystickBase = document.getElementById('joystick-base');
+        const joystickThumb = document.getElementById('joystick-thumb');
+        let maxRadius; // Calculated in resetGame
+        let joystickActive = false;
+        let touchIdentifier = null; 
+
+        // Reference size and scaling factor
+        const REFERENCE_WIDTH = 600;
+        const REFERENCE_HEIGHT = 400;
+        let scaleFactor = 1.0; 
 
         let animationId;
         let frame = 0;
         let score = 0;
         let isGameOver = false;
 
-        // Arena boundaries (for Tiny mode)
-        let arena = { x: 0, y: 0, w: 600, h: 400 };
+        let arena = { x: 0, y: 0, w: REFERENCE_WIDTH, h: REFERENCE_HEIGHT };
 
         const player = {
             x: 300, y: 200,
@@ -139,7 +210,7 @@
             color: '#ff0000',
             hp: 30, maxHp: 30,
             invincible: false, invincibleTimer: 0,
-            vx: 0, vy: 0, // Velocity
+            vx: 0, vy: 0, 
             gravity: 0.6, jumpPower: -10,
             grounded: false
         };
@@ -151,10 +222,52 @@
         const keys = { ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false };
         let bullets = [];
 
-        window.addEventListener('keydown', (e) => { if(keys.hasOwnProperty(e.code)) keys[e.code] = true; });
-        window.addEventListener('keyup', (e) => { if(keys.hasOwnProperty(e.code)) keys[e.code] = false; });
+        window.addEventListener('keydown', (e) => { 
+            if(keys.hasOwnProperty(e.code)) keys[e.code] = true; 
+        });
+        window.addEventListener('keyup', (e) => { 
+            if(keys.hasOwnProperty(e.code)) keys[e.code] = false; 
+        });
+
+        // --- NEW: Handle Canvas Resize and Scaling ---
+        function resizeCanvas() {
+            // Set canvas dimensions to be the same as the container's computed size
+            const rect = container.getBoundingClientRect();
+            canvas.width = rect.width;
+            canvas.height = rect.height;
+
+            // Calculate the new scaling factor based on the current canvas width
+            scaleFactor = canvas.width / REFERENCE_WIDTH;
+
+            // Update mode-based arena boundary if needed (for Tiny mode)
+            if (currentMode === 'tiny') {
+                 // Rescale the tiny arena boundaries based on new canvas size
+                 arena.x = 150 * scaleFactor;
+                 arena.y = 100 * scaleFactor;
+                 arena.w = 300 * scaleFactor;
+                 arena.h = 200 * scaleFactor;
+            } else {
+                 // Set arena to full canvas size
+                 arena.x = 0;
+                 arena.y = 0;
+                 arena.w = canvas.width;
+                 arena.h = canvas.height;
+            }
+
+            // Update joystick radius for accurate calculation
+            maxRadius = joystickBase.clientWidth / 2;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        // --- END NEW ---
 
         function resetGame() {
+            // 1. First, resize the canvas to get the current scaleFactor
+            resizeCanvas(); 
+
+            // 2. Reset player position based on scaled center
+            player.x = arena.w / 2 - (player.size * scaleFactor) / 2;
+            player.y = arena.h / 2 - (player.size * scaleFactor) / 2;
+
             player.hp = player.maxHp;
             player.invincible = false;
             bullets = [];
@@ -167,22 +280,27 @@
             animate();
         }
 
-        // --- MODE MANAGEMENT ---
         function setMode(mode) {
             currentMode = mode;
-            modeTimer = 400; // Duration of hazard
+            modeTimer = 400; 
             globalTimeScale = 1.0;
             
-            // Reset Arena
-            arena = { x: 0, y: 0, w: 600, h: 400 };
-            container.style.width = '600px';
-            container.style.height = '400px';
-            canvas.width = 600;
-            canvas.height = 400;
+            // Set/Reset Arena boundaries using the scale factor
+            if (mode === 'tiny') {
+                 arena.x = 150 * scaleFactor;
+                 arena.y = 100 * scaleFactor;
+                 arena.w = 300 * scaleFactor;
+                 arena.h = 200 * scaleFactor;
+            } else {
+                 arena.x = 0;
+                 arena.y = 0;
+                 arena.w = canvas.width;
+                 arena.h = canvas.height;
+            }
 
+            // CSS visual updates
             let color = 'white';
             let text = "";
-
             switch(mode) {
                 case 'normal': text = ""; color = 'white'; break;
                 case 'gravity': text = "BLUE MODE (JUMP)"; color = '#0088ff'; player.vy = 0; break;
@@ -191,11 +309,7 @@
                 case 'windy': text = "GREEN MODE (WIND)"; color = '#00ff00'; break;
                 case 'icy': text = "CYAN MODE (SLIPPERY)"; color = '#00ffff'; break;
                 case 'darkness': text = "DARKNESS"; color = '#333'; break;
-                case 'tiny': 
-                    text = "TINY ARENA"; 
-                    color = '#888'; 
-                    arena = { x: 150, y: 100, w: 300, h: 200 };
-                    break;
+                case 'tiny': text = "TINY ARENA"; color = '#888'; break;
                 case 'blink': text = "BLINKING"; color = '#ffffff'; break;
                 case 'turbo': text = "TURBO SPEED"; color = '#ff0000'; globalTimeScale = 1.5; break;
             }
@@ -222,292 +336,353 @@
             }
         }
 
-        // --- PHYSICS & CONTROLS ---
+        // --- JOYSTICK LOGIC (Same logic, but uses maxRadius calculated in resizeCanvas) ---
+        function handleJoystickMove(e) {
+            e.preventDefault();
+            if (!joystickActive) return;
+
+            let touch;
+            if (e.touches) {
+                 touch = Array.from(e.touches).find(t => t.identifier === touchIdentifier);
+                 if (!touch) return;
+            } else {
+                 touch = e;
+            }
+
+            const rect = joystickBase.getBoundingClientRect();
+            const centerX = rect.left + maxRadius;
+            const centerY = rect.top + maxRadius;
+
+            let deltaX = touch.clientX - centerX;
+            let deltaY = touch.clientY - centerY;
+            const distance = Math.min(Math.sqrt(deltaX * deltaX + deltaY * deltaY), maxRadius);
+
+            const angle = Math.atan2(deltaY, deltaX);
+            const limitedX = distance * Math.cos(angle);
+            const limitedY = distance * Math.sin(angle);
+
+            joystickThumb.style.transform = `translate(${limitedX}px, ${limitedY}px)`;
+            
+            const strength = distance / maxRadius;
+            
+            player.vx_input = strength * Math.cos(angle);
+            player.vy_input = strength * Math.sin(angle);
+
+            // Jump logic
+            keys.ArrowUp = currentMode === 'gravity' && limitedY < -maxRadius * 0.7;
+        }
+
+        function handleJoystickStart(e) {
+            if (e.touches) {
+                if (joystickActive) return;
+                const touch = e.changedTouches[0];
+                touchIdentifier = touch.identifier;
+            } 
+            
+            joystickActive = true;
+            handleJoystickMove(e.touches ? e : e);
+        }
+
+        function handleJoystickEnd() {
+            joystickActive = false;
+            touchIdentifier = null;
+            player.vx_input = 0;
+            player.vy_input = 0;
+            keys.ArrowUp = false; 
+
+            joystickThumb.style.transform = `translate(-50%, -50%)`;
+        }
+        
+        // Add listeners for touch/mouse
+        joystickBase.addEventListener('mousedown', handleJoystickStart);
+        document.addEventListener('mousemove', handleJoystickMove);
+        document.addEventListener('mouseup', handleJoystickEnd);
+
+        joystickBase.addEventListener('touchstart', handleJoystickStart, { passive: false });
+        document.addEventListener('touchmove', handleJoystickMove, { passive: false });
+        document.addEventListener('touchend', handleJoystickEnd);
+        document.addEventListener('touchcancel', handleJoystickEnd);
+
+
         function updatePlayer() {
-            let spd = player.speed * globalTimeScale;
-            if (currentMode === 'heavy') spd /= 2;
+            // All base speeds and sizes must be scaled
+            const S_SIZE = player.size * scaleFactor;
+            let S_SPEED = player.speed * scaleFactor * globalTimeScale;
+            if (currentMode === 'heavy') S_SPEED /= 2;
             
             let dx = 0; 
             let dy = 0;
+            let appliedVx = 0;
+            let appliedVy = 0;
 
-            // Input Handling
-            let up = keys.ArrowUp;
-            let down = keys.ArrowDown;
-            let left = keys.ArrowLeft;
-            let right = keys.ArrowRight;
-
-            if (currentMode === 'inverted') {
-                up = keys.ArrowDown; down = keys.ArrowUp;
-                left = keys.ArrowRight; right = keys.ArrowLeft;
+            if (joystickActive) {
+                dx = player.vx_input * S_SPEED;
+                dy = player.vy_input * S_SPEED;
+            } else {
+                let invertedFactor = (currentMode === 'inverted') ? -1 : 1;
+                
+                if (keys.ArrowLeft) dx = -S_SPEED * invertedFactor;
+                if (keys.ArrowRight) dx = S_SPEED * invertedFactor;
+                if (keys.ArrowUp && currentMode !== 'gravity') dy = -S_SPEED * invertedFactor;
+                if (keys.ArrowDown && currentMode !== 'gravity') dy = S_SPEED * invertedFactor;
             }
 
-            // X Movement
-            if (left) dx = -spd;
-            if (right) dx = spd;
-
-            // Y Movement (Normal)
-            if (currentMode !== 'gravity') {
-                if (up) dy = -spd;
-                if (down) dy = spd;
-            }
 
             // Physics Applications
             if (currentMode === 'icy') {
-                // Apply force to velocity instead of direct position
-                if (left) player.vx -= 0.5;
-                if (right) player.vx += 0.5;
-                if (up && currentMode !== 'gravity') player.vy -= 0.5;
-                if (down && currentMode !== 'gravity') player.vy += 0.5;
+                player.vx += dx * 0.1; 
+                player.vy += dy * 0.1;
                 
-                // Friction
                 player.vx *= 0.92;
                 player.vy *= 0.92;
                 
-                player.x += player.vx * globalTimeScale;
-                player.y += player.vy * globalTimeScale;
+                appliedVx = player.vx * globalTimeScale;
+                appliedVy = player.vy * globalTimeScale;
             } 
             else if (currentMode === 'gravity') {
-                // Horizontal is direct
-                player.x += dx;
+                appliedVx = dx;
                 
-                // Vertical is physics
-                player.vy += player.gravity * globalTimeScale;
-                player.y += player.vy * globalTimeScale;
+                player.vy += player.gravity * scaleFactor * globalTimeScale; // Gravity must be scaled
+                appliedVy = player.vy * globalTimeScale;
 
-                // Floor collision
-                if (player.y + player.size > arena.y + arena.h) {
-                    player.y = arena.y + arena.h - player.size;
+                if (player.y + S_SIZE > arena.y + arena.h) {
+                    player.y = arena.y + arena.h - S_SIZE;
                     player.vy = 0;
                     player.grounded = true;
                 } else {
                     player.grounded = false;
                 }
 
-                if (up && player.grounded) {
-                    player.vy = player.jumpPower;
+                if (keys.ArrowUp && player.grounded) {
+                    player.vy = player.jumpPower * scaleFactor; // Jump power must be scaled
                 }
             } 
             else {
-                // Standard Movement
-                player.x += dx;
-                player.y += dy;
+                appliedVx = dx;
+                appliedVy = dy;
+                player.vx = 0; 
+                player.vy = 0; 
             }
+
+            player.x += appliedVx;
+            player.y += appliedVy;
 
             // Wind Effect
             if (currentMode === 'windy') {
-                player.x += 1.5 * globalTimeScale;
+                player.x += 1.5 * scaleFactor * globalTimeScale;
             }
 
-            // Boundary Checks (Dynamic based on Arena size)
+            // Boundary Checks 
             if (player.x < arena.x) player.x = arena.x;
-            if (player.x + player.size > arena.x + arena.w) player.x = arena.x + arena.w - player.size;
+            if (player.x + S_SIZE > arena.x + arena.w) player.x = arena.x + arena.w - S_SIZE;
             if (currentMode !== 'gravity') {
                 if (player.y < arena.y) player.y = arena.y;
-                if (player.y + player.size > arena.y + arena.h) player.y = arena.y + arena.h - player.size;
+                if (player.y + S_SIZE > arena.y + arena.h) player.y = arena.y + arena.h - S_SIZE;
             }
 
-            // Invincibility
             if (player.invincible) {
                 player.invincibleTimer--;
                 if (player.invincibleTimer <= 0) player.invincible = false;
             }
         }
 
-        // --- BULLET SYSTEM ---
+        // --- BULLET SYSTEM (Modify to use scaled sizes and speeds) ---
+        
+        // This function creates a new bullet with scaled properties
+        function createScaledBullet(type, refX, refY, refW, refH, refVX, refVY, color, properties = {}) {
+            return {
+                type: type,
+                x: refX * scaleFactor,
+                y: refY * scaleFactor,
+                w: refW * scaleFactor,
+                h: refH * scaleFactor,
+                vx: refVX * scaleFactor,
+                vy: refVY * scaleFactor,
+                color: color,
+                ...properties
+            };
+        }
+
         function spawnBullet() {
-            // Difficulty scaling
             let rate = Math.max(15, 50 - Math.floor(score / 300));
             if (currentMode === 'turbo') rate = Math.max(10, rate / 1.5);
 
             if (frame % rate === 0) {
                 const r = Math.random();
+                const centerRefX = (Math.random() * REFERENCE_WIDTH);
+                const sideRefY = (Math.random() * REFERENCE_HEIGHT);
                 
-                // 1. Standard (White)
-                if (r < 0.25) {
-                    bullets.push({ type: 'standard', x: Math.random() * arena.w + arena.x, y: arena.y - 20, w: 6, h: 6, vx: 0, vy: 3 + Math.random()*2, color: 'white' });
-                }
-                // 2. Side (Yellow)
-                else if (r < 0.40) {
+                if (r < 0.25) { // Standard (White)
+                    bullets.push(createScaledBullet('standard', centerRefX, -20, 6, 6, 0, 3 + Math.random()*2, 'white'));
+                } else if (r < 0.40) { // Side (Yellow)
                     let fromLeft = Math.random() < 0.5;
-                    bullets.push({ type: 'side', x: fromLeft ? arena.x - 20 : arena.x + arena.w + 20, y: Math.random() * arena.h + arena.y, w: 10, h: 6, vx: fromLeft ? 4+Math.random()*3 : -(4+Math.random()*3), vy: 0, color: '#ffff00' });
-                }
-                // 3. Homer (Purple)
-                else if (r < 0.50) {
-                    bullets.push({ type: 'homer', x: Math.random() * arena.w + arena.x, y: arena.y - 20, w: 8, h: 8, vx: 0, vy: 2, color: '#a020f0' });
-                }
-                // 4. Bouncer (Green)
-                else if (r < 0.60) {
-                     bullets.push({ type: 'bouncer', x: Math.random() * arena.w + arena.x, y: arena.y, w: 10, h: 10, vx: (Math.random()-0.5)*6, vy: 3, color: '#00ff00' });
-                }
-                // 5. Splitter (Pink)
-                else if (r < 0.65) {
-                    bullets.push({ type: 'splitter', x: Math.random() * arena.w + arena.x, y: arena.y - 20, w: 12, h: 12, vx: 0, vy: 3, split: false, color: '#ff69b4' });
-                }
-                // 6. Mine (Red pulse)
-                else if (r < 0.70) {
-                    bullets.push({ type: 'mine', x: Math.random() * arena.w + arena.x, y: arena.y - 20, w: 14, h: 14, vx: 0, vy: 4, state: 'fall', timer: 60, color: '#ff4444' });
-                }
-                // 7. Sine Wave (Cyan)
-                else if (r < 0.75) {
-                    bullets.push({ type: 'sine', startX: Math.random() * arena.w + arena.x, x: 0, y: arena.y - 20, w: 8, h: 8, vx: 0, vy: 3, t: 0, color: '#00ffff' });
-                }
-                // 8. Boomerang (Orange)
-                else if (r < 0.80) {
-                    bullets.push({ type: 'boomerang', x: player.x, y: arena.y - 20, w: 8, h: 14, vx: 0, vy: 6, state: 'down', color: '#ffaa00' });
-                }
-                // 9. Orbiter (White core, blue orbit)
-                else if (r < 0.85) {
-                    bullets.push({ type: 'orbiter', x: Math.random() * arena.w + arena.x, y: arena.y - 20, w: 12, h: 12, vx: 0, vy: 2, angle: 0, color: 'white' });
+                    bullets.push(createScaledBullet('side', fromLeft ? -20 : REFERENCE_WIDTH + 20, sideRefY, 10, 6, fromLeft ? 4+Math.random()*3 : -(4+Math.random()*3), 0, '#ffff00'));
+                } else if (r < 0.50) { // Homer (Purple)
+                    bullets.push(createScaledBullet('homer', centerRefX, -20, 8, 8, 0, 2, '#a020f0'));
+                } else if (r < 0.60) { // Bouncer (Green)
+                     bullets.push(createScaledBullet('bouncer', centerRefX, 0, 10, 10, (Math.random()-0.5)*6, 3, '#00ff00'));
+                } else if (r < 0.65) { // Splitter (Pink)
+                    bullets.push(createScaledBullet('splitter', centerRefX, -20, 12, 12, 0, 3, '#ff69b4', { split: false }));
+                } else if (r < 0.70) { // Mine (Red pulse)
+                    bullets.push(createScaledBullet('mine', centerRefX, -20, 14, 14, 0, 4, '#ff4444', { state: 'fall', timer: 60 }));
+                } else if (r < 0.75) { // Sine Wave (Cyan)
+                    bullets.push(createScaledBullet('sine', centerRefX, -20, 8, 8, 0, 3, '#00ffff', { startX: centerRefX * scaleFactor, t: 0 }));
+                } else if (r < 0.80) { // Boomerang (Orange)
+                    bullets.push(createScaledBullet('boomerang', player.x / scaleFactor, -20, 8, 14, 0, 6, '#ffaa00', { state: 'down' }));
+                } else if (r < 0.85) { // Orbiter (White core, blue orbit)
+                    bullets.push(createScaledBullet('orbiter', centerRefX, -20, 12, 12, 0, 2, 'white', { angle: 0 }));
                 }
             }
 
-            // Specialized Spawns (Less frequent)
-            // 10. Laser (Red Beam)
+            // Specialized Spawns (Use raw scale factors where appropriate)
             if (frame % 200 === 0 && Math.random() > 0.4) {
-                bullets.push({ type: 'laser', x: player.x + 8, y: 0, w: 2, h: canvas.height, state: 'warn', timer: 60, color: 'red' });
+                let laserX = (player.x + player.size/2) / scaleFactor; // player center in reference coordinates
+                bullets.push(createScaledBullet('laser', laserX, 0, 2, REFERENCE_HEIGHT, 0, 0, 'red', { state: 'warn', timer: 60 }));
             }
-            // 11. Spear (Upward Spike)
             if (frame % 180 === 0 && Math.random() > 0.5) {
-                bullets.push({ type: 'spear', x: player.x, y: arena.y + arena.h, w: 10, h: 0, maxH: 100, state: 'rise', color: '#aaa' });
+                let spearX = (player.x + player.size/2) / scaleFactor - 5;
+                bullets.push(createScaledBullet('spear', spearX, REFERENCE_HEIGHT, 10, 0, 0, 0, '#aaa', { maxH: 100, state: 'rise' }));
             }
-            // 12. Grid (Horizontal Wall)
             if (frame % 350 === 0) {
                 let gap = Math.floor(Math.random() * 10);
                 for(let i=0; i<10; i++) {
                     if (i === gap || i === gap+1) continue;
-                    bullets.push({ type: 'standard', x: arena.x + (i * (arena.w/10)) + 10, y: arena.y - 50, w: 10, h: 10, vx: 0, vy: 2.5, color: '#555' });
+                    let refX = (i * (REFERENCE_WIDTH/10)) + 10;
+                    bullets.push(createScaledBullet('standard', refX, -50, 10, 10, 0, 2.5, '#555'));
                 }
             }
-            // 13. Ring (Explosion)
             if (frame % 400 === 0) {
-                let cx = arena.x + arena.w/2;
-                let cy = arena.y + arena.h/3;
+                let cx = REFERENCE_WIDTH/2;
+                let cy = REFERENCE_HEIGHT/3;
                 for (let i=0; i<8; i++) {
                     let angle = (Math.PI*2 / 8) * i;
-                    bullets.push({ type: 'standard', x: cx, y: cy, w: 8, h: 8, vx: Math.cos(angle)*3, vy: Math.sin(angle)*3, color: 'cyan' });
+                    bullets.push(createScaledBullet('standard', cx, cy, 8, 8, Math.cos(angle)*3, Math.sin(angle)*3, 'cyan'));
                 }
             }
         }
 
         function updateBullets() {
+            const S_SIZE = player.size * scaleFactor;
+
             for (let i = bullets.length - 1; i >= 0; i--) {
                 let b = bullets[i];
                 let ts = globalTimeScale;
 
-                // --- LOGIC ---
-                if (b.type === 'standard' || b.type === 'side') {
-                    b.x += b.vx * ts;
-                    b.y += b.vy * ts;
+                // --- LOGIC --- (All constants/speeds must be scaled by scaleFactor * globalTimeScale)
+                const SPEED_SCALAR = ts;
+                
+                if (b.type === 'standard' || b.type === 'side' || b.type === 'bouncer') {
+                    b.x += b.vx * SPEED_SCALAR;
+                    b.y += b.vy * SPEED_SCALAR;
+                    if (b.type === 'bouncer' && (b.x <= arena.x || b.x + b.w >= arena.x + arena.w)) b.vx *= -1;
                 }
                 else if (b.type === 'homer') {
-                    b.y += b.vy * ts;
-                    if(b.x < player.x) b.x += 0.5 * ts;
-                    if(b.x > player.x) b.x -= 0.5 * ts;
-                }
-                else if (b.type === 'bouncer') {
-                    b.x += b.vx * ts;
-                    b.y += b.vy * ts;
-                    if (b.x <= arena.x || b.x + b.w >= arena.x + arena.w) b.vx *= -1;
+                    b.y += b.vy * SPEED_SCALAR;
+                    // Homing speed (0.5 ref speed) must be scaled
+                    const homingSpeed = 0.5 * scaleFactor * SPEED_SCALAR;
+                    if(b.x < player.x) b.x += homingSpeed;
+                    if(b.x > player.x) b.x -= homingSpeed;
                 }
                 else if (b.type === 'splitter') {
-                    b.y += b.vy * ts;
+                    b.y += b.vy * SPEED_SCALAR;
+                    // Split point must be scaled
                     if (!b.split && b.y > arena.y + arena.h / 2) {
                         b.split = true;
-                        bullets.push({ type: 'standard', x: b.x, y: b.y, w: 8, h: 8, vx: -3, vy: 2, color: b.color });
-                        bullets.push({ type: 'standard', x: b.x, y: b.y, w: 8, h: 8, vx: 3, vy: 2, color: b.color });
+                        bullets.push(createScaledBullet('standard', b.x / scaleFactor, b.y / scaleFactor, 8, 8, -3, 2, b.color));
+                        bullets.push(createScaledBullet('standard', b.x / scaleFactor, b.y / scaleFactor, 8, 8, 3, 2, b.color));
                         bullets.splice(i, 1);
                         continue;
                     }
                 }
                 else if (b.type === 'mine') {
                     if (b.state === 'fall') {
-                        b.y += b.vy * ts;
+                        b.y += b.vy * SPEED_SCALAR;
                         if (b.y > arena.y + arena.h / 2) b.state = 'wait';
                     } else if (b.state === 'wait') {
-                        b.timer -= 1 * ts;
+                        b.timer -= 1 * SPEED_SCALAR;
                         b.color = (Math.floor(frame/5)%2===0) ? 'red' : 'white';
                         if (b.timer <= 0) {
-                            // Explode
-                            bullets.push({ type: 'standard', x: b.x, y: b.y, w: 8, h: 8, vx: -4, vy: -4, color: 'red' });
-                            bullets.push({ type: 'standard', x: b.x, y: b.y, w: 8, h: 8, vx: 4, vy: -4, color: 'red' });
-                            bullets.push({ type: 'standard', x: b.x, y: b.y, w: 8, h: 8, vx: -4, vy: 4, color: 'red' });
-                            bullets.push({ type: 'standard', x: b.x, y: b.y, w: 8, h: 8, vx: 4, vy: 4, color: 'red' });
+                            [-4, 4].forEach(refVx => [-4, 4].forEach(refVy => {
+                                bullets.push(createScaledBullet('standard', b.x / scaleFactor, b.y / scaleFactor, 8, 8, refVx, refVy, 'red'));
+                            }));
                             bullets.splice(i, 1);
                             continue;
                         }
                     }
                 }
                 else if (b.type === 'sine') {
-                    b.t += 0.1 * ts;
-                    b.y += b.vy * ts;
-                    b.x = b.startX + Math.sin(b.t) * 50;
+                    b.t += 0.1 * SPEED_SCALAR;
+                    b.y += b.vy * SPEED_SCALAR;
+                    // Sine amplitude (50 ref size) must be scaled
+                    b.x = b.startX + Math.sin(b.t) * (50 * scaleFactor);
                 }
                 else if (b.type === 'laser') {
                     if (b.state === 'warn') {
-                        b.w = 2;
-                        b.timer -= 1 * ts;
+                        b.w = 2 * scaleFactor;
+                        b.timer -= 1 * SPEED_SCALAR;
                         if (b.timer <= 0) {
                              b.state = 'fire'; 
-                             b.w = 20; // expand hitbox
-                             b.timer = 20; // duration
-                             b.x -= 9; // center correction
+                             b.w = 20 * scaleFactor;
+                             b.timer = 20; 
+                             b.x -= 9 * scaleFactor;
                         }
                     } else {
-                        b.timer -= 1 * ts;
-                        if (b.timer <= 0) {
-                            bullets.splice(i, 1);
-                            continue;
-                        }
+                        b.timer -= 1 * SPEED_SCALAR;
+                        if (b.timer <= 0) { bullets.splice(i, 1); continue; }
                     }
                 }
                 else if (b.type === 'spear') {
+                    const riseSpeed = 5 * scaleFactor * SPEED_SCALAR;
+                    const retractSpeed = 2 * scaleFactor * SPEED_SCALAR;
+                    const maxH = b.maxH * scaleFactor;
+
                     if (b.state === 'rise') {
-                        b.h += 5 * ts;
-                        b.y -= 5 * ts;
-                        if (b.h >= b.maxH) b.state = 'retract';
+                        b.h += riseSpeed;
+                        b.y -= riseSpeed;
+                        if (b.h >= maxH) b.state = 'retract';
                     } else {
-                        b.h -= 2 * ts;
-                        b.y += 2 * ts;
-                        if (b.h <= 0) {
-                            bullets.splice(i, 1);
-                            continue;
-                        }
+                        b.h -= retractSpeed;
+                        b.y += retractSpeed;
+                        if (b.h <= 0) { bullets.splice(i, 1); continue; }
                     }
                 }
                 else if (b.type === 'boomerang') {
+                    const endY = (REFERENCE_HEIGHT - 50) * scaleFactor;
+                    b.vy_scaled = 6 * scaleFactor;
+
                     if (b.state === 'down') {
-                        b.y += b.vy * ts;
-                        if (b.y > arena.y + arena.h - 50) b.state = 'up';
+                        b.y += b.vy_scaled * SPEED_SCALAR;
+                        if (b.y > arena.y + endY) b.state = 'up';
                     } else {
-                        b.y -= b.vy * ts;
+                        b.y -= b.vy_scaled * SPEED_SCALAR;
                     }
                 }
                 else if (b.type === 'orbiter') {
-                    b.y += b.vy * ts;
-                    b.angle += 0.1 * ts;
-                    // Note: Collision handled for core, we need to manually draw/check the orbiter
+                    b.y += b.vy * SPEED_SCALAR;
+                    b.angle += 0.1 * SPEED_SCALAR;
                 }
 
-                // --- COLLISION ---
-                // Simple AABB
+                // --- COLLISION (Uses scaled dimensions) ---
                 let hit = false;
                 
-                // Extra check for Orbiter satellite
+                // Orbiter satellite check
                 if (b.type === 'orbiter') {
-                    let satX = b.x + Math.cos(b.angle)*30;
-                    let satY = b.y + Math.sin(b.angle)*30;
-                    if (player.x < satX + 10 && player.x + player.size > satX &&
-                        player.y < satY + 10 && player.y + player.size > satY) hit = true;
+                    const ORBIT_RADIUS = 30 * scaleFactor;
+                    const SAT_SIZE = 10 * scaleFactor; 
+                    let satX = b.x + Math.cos(b.angle) * ORBIT_RADIUS;
+                    let satY = b.y + Math.sin(b.angle) * ORBIT_RADIUS;
+                    if (player.x < satX + SAT_SIZE && player.x + S_SIZE > satX &&
+                        player.y < satY + SAT_SIZE && player.y + S_SIZE > satY) hit = true;
                 }
 
+                // General AABB check
                 if (
                     player.x < b.x + b.w &&
-                    player.x + player.size > b.x &&
+                    player.x + S_SIZE > b.x && // Use scaled player size S_SIZE
                     player.y < b.y + b.h &&
-                    player.y + player.size > b.y
+                    player.y + S_SIZE > b.y
                 ) {
                     hit = true;
-                    // Laser only hits in 'fire' state
                     if (b.type === 'laser' && b.state === 'warn') hit = false;
                 }
 
@@ -521,7 +696,7 @@
 
                 // Cleanup bounds
                 if (b.type !== 'boomerang' && b.type !== 'spear' && b.type !== 'laser' && b.type !== 'mine') {
-                    if (b.y > 600 || b.x < -100 || b.x > 700 || b.y < -100) bullets.splice(i, 1);
+                    if (b.y > canvas.height + 50 || b.x < -100 || b.x > canvas.width + 100 || b.y < -100) bullets.splice(i, 1);
                 }
             }
         }
@@ -534,22 +709,24 @@
         }
 
         function draw() {
-            // Draw Background (Clear)
-            ctx.fillStyle = 'black';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
 
             // Draw Tiny Arena Border (if active)
             if (currentMode === 'tiny') {
                 ctx.strokeStyle = 'white';
-                ctx.lineWidth = 2;
+                ctx.lineWidth = 2 * scaleFactor; // Scale line width
                 ctx.strokeRect(arena.x, arena.y, arena.w, arena.h);
+            } else {
+                 ctx.fillStyle = 'black';
+                 ctx.fillRect(0, 0, canvas.width, canvas.height);
             }
 
             // Draw Player
+            const S_SIZE = player.size * scaleFactor;
             if (!player.invincible || frame % 4 === 0) {
                 if (currentMode !== 'blink' || frame % 10 < 5) {
                     ctx.fillStyle = player.color;
-                    ctx.fillRect(player.x, player.y, player.size, player.size);
+                    ctx.fillRect(player.x, player.y, S_SIZE, S_SIZE);
                 }
             }
 
@@ -561,10 +738,12 @@
                     // Core
                     ctx.beginPath(); ctx.arc(b.x + b.w/2, b.y + b.h/2, b.w/2, 0, Math.PI*2); ctx.fill();
                     // Satellite
-                    let satX = b.x + Math.cos(b.angle)*30;
-                    let satY = b.y + Math.sin(b.angle)*30;
+                    const ORBIT_RADIUS = 30 * scaleFactor;
+                    const SAT_SIZE = 5 * scaleFactor;
+                    let satX = b.x + Math.cos(b.angle) * ORBIT_RADIUS;
+                    let satY = b.y + Math.sin(b.angle) * ORBIT_RADIUS;
                     ctx.fillStyle = '#0088ff';
-                    ctx.beginPath(); ctx.arc(satX + 5, satY + 5, 5, 0, Math.PI*2); ctx.fill();
+                    ctx.beginPath(); ctx.arc(satX + SAT_SIZE/2, satY + SAT_SIZE/2, SAT_SIZE, 0, Math.PI*2); ctx.fill();
                 }
                 else if (b.type === 'laser') {
                     if (b.state === 'warn') ctx.globalAlpha = 0.5;
@@ -579,11 +758,8 @@
                     ctx.fill();
                 }
                 else {
-                    // Generic shapes
-                    if (b.w === b.h) { // Circle-ish
-                        ctx.beginPath();
-                        ctx.arc(b.x + b.w/2, b.y + b.h/2, b.w/2, 0, Math.PI*2);
-                        ctx.fill();
+                    if (b.w === b.h) { 
+                        ctx.beginPath(); ctx.arc(b.x + b.w/2, b.y + b.h/2, b.w/2, 0, Math.PI*2); ctx.fill();
                     } else {
                         ctx.fillRect(b.x, b.y, b.w, b.h);
                     }
@@ -595,7 +771,8 @@
                 ctx.fillStyle = 'black';
                 ctx.beginPath();
                 ctx.rect(0, 0, canvas.width, canvas.height);
-                ctx.arc(player.x + player.size/2, player.y + player.size/2, 100, 0, Math.PI * 2, true);
+                // View radius (100 ref size) must be scaled
+                ctx.arc(player.x + S_SIZE/2, player.y + S_SIZE/2, 100 * scaleFactor, 0, Math.PI * 2, true);
                 ctx.fill();
             }
         }
